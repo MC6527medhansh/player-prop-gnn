@@ -68,6 +68,11 @@ Swish Analytics needs soccer player prop prediction with correlated parlay prici
 ## Latest Decisions
 (Update this section as you make major decisions during development)
 
+### 2025-10-31 - Phase 0 Complete
+- **Decision**: Foundation setup complete
+- **Status**: All base files created, dependencies installed, git initialized
+- **Next**: Phase 1 data collection
+
 ### [Date] - Decision Template
 - **Decision**: What you decided
 - **Reasoning**: Why you decided this
@@ -88,10 +93,6 @@ Current task: [specific task]. Question: [question]"
 ```
 Add to "Latest Decisions" section with date, decision, reasoning
 ```
-### 2025-10-31 - Phase 0 Complete
-- **Decision**: Foundation setup complete
-- **Status**: All base files created, dependencies installed, git initialized
-- **Next**: Phase 1 data collection
 
 ### Before Moving to Next Phase
 ```
