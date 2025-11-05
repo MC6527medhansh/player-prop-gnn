@@ -73,6 +73,23 @@ Swish Analytics needs soccer player prop prediction with correlated parlay prici
 - **Status**: All base files created, dependencies installed, git initialized
 - **Next**: Phase 1 data collection
 
+### 2025-11-02 - Phase 1 Architecture Complete
+- **Decision**: All architecture documented in docs/
+- **Status**: Design validated, ready for implementation
+- **Docs Created**: data_schema.md, model_architecture.md, gnn_architecture.md, api_spec.md, deployment_guide.md
+- **Next**: Phase 2 - Data Infrastructure Implementation
+
+### 2025-11-02 - Phase 2.1 Complete: Database + Validation
+- **Decision**: PostgreSQL schema implemented with 6 tables
+- **Status**: Database working, 20 validation tests passing (98% coverage)
+- **Files Created**:
+  - data/schemas/create_tables.sql
+  - src/data/validation.py
+  - tests/unit/test_validation.py
+- **Tables**: teams, players, matches, player_match_stats, rolling_features, bookmaker_odds
+- **Positions**: 'Forward', 'Midfielder', 'Defender', 'Goalkeeper' (full words)
+- **Next**: Phase 2.2 - StatsBomb Loader (World Cup 2018 data)
+
 ### [Date] - Decision Template
 - **Decision**: What you decided
 - **Reasoning**: Why you decided this
