@@ -90,6 +90,23 @@ Swish Analytics needs soccer player prop prediction with correlated parlay prici
 - **Positions**: 'Forward', 'Midfielder', 'Defender', 'Goalkeeper' (full words)
 - **Next**: Phase 2.2 - StatsBomb Loader (World Cup 2018 data)
 
+### 2025-11-07 - Phase 2.2 Complete: StatsBomb Loader
+- **Decision**: World Cup 2018 data successfully loaded into PostgreSQL
+- **Status**: 
+  - 32 teams, 603 players, 64 matches, 1720 player-match records
+  - 155 goals, 1606 shots recorded
+  - Database: football_props on localhost
+  - User: medhanshchoubey (no password)
+- **Files Created**:
+  - src/data/statsbomb_loader.py (working)
+  - src/data/load_world_cup_2018.py (working)
+  - tests/unit/test_statsbomb_loader.py (created)
+- **Known Issues**: 
+  - Assists = 0 (StatsBomb API column naming, non-critical for Phase 3)
+  - Can be fixed later if needed
+- **Data Quality**: All validation passing, sufficient for baseline model
+- **Next**: Phase 2.4 - Feature Engineering OR Phase 3 - Baseline Model
+
 ### [Date] - Decision Template
 - **Decision**: What you decided
 - **Reasoning**: Why you decided this
