@@ -107,6 +107,14 @@ Swish Analytics needs soccer player prop prediction with correlated parlay prici
 - **Data Quality**: All validation passing, sufficient for baseline model
 - **Next**: Phase 2.4 - Feature Engineering OR Phase 3 - Baseline Model
 
+### 2025-11-07 - Phase 2.4 Complete: Feature Engineering
+- **Decision**: Features calculated for all 1720 player-match records
+- **Status**: player_features.csv created (1720 rows × 34 columns)
+- **Features**: 10 rolling features (goals, assists, shots, cards for 5 & 10 game windows)
+- **Validation**: No NaN values, opponent_strength calculated, tests passing 16/16
+- **Files**: src/data/features.py, tests/unit/test_features.py
+- **Next**: Phase 2.5 - Load features into database player_features table
+
 ### [Date] - Decision Template
 - **Decision**: What you decided
 - **Reasoning**: Why you decided this

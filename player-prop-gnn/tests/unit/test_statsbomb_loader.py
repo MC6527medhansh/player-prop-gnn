@@ -10,7 +10,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from statsbomb_loader import StatsBombLoader
+from src.data.statsbomb_loader import StatsBombLoader
 
 
 class TestStatsBombLoader:
