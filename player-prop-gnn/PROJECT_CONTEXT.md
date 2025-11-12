@@ -133,6 +133,17 @@ Swish Analytics needs soccer player prop prediction with correlated parlay prici
   - Goal: ECE < 0.15
   - Target: Beat historical average baseline
 
+### 2025-11-11 - Phase 3.1 Complete: EDA + Baseline Calibration
+- **Decision**: EDA finished; baseline logistic models trained for **goals**, **shots on target**, and **cards** (assists excluded).  
+  Baseline achieves **average ECE = 0.0225 (< 0.05)** → calibration gate satisfied by baseline.
+- **Status**: Generated distributions, position breakdowns, correlations, and calibration plots (docs/01–05).  
+  Notable: **corr(goals, shots_on_target) ≈ 0.59** (supports multi-task).  
+  **was_home** coefficient negative in baseline → treat with **neutral/cautious prior**.
+- **Known Issues**: **Assists all zeros** → defer assists modeling until Phase 2 loader is fixed.
+- **Next**: **Phase 3.2 – Bayesian Goals Model (PyMC v5)**  
+  *Maintain* ECE < 0.05, add uncertainty (credible intervals), hierarchical priors by position, convergence checks (R-hat < 1.01, ESS > 400).
+
+
 ### [Date] - Decision Template
 - **Decision**: What you decided
 - **Reasoning**: Why you decided this
