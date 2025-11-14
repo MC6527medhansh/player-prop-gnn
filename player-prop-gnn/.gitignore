@@ -139,3 +139,8 @@ credentials.json
 *.tar.gz
 *.zip
 *.7z
+models/*.nc
+models/*.h5
+models/*.zarr
+models/*.pkl
+artifacts/
