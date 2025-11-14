@@ -142,6 +142,15 @@ Swish Analytics needs soccer player prop prediction with correlated parlay prici
 - **Known Issues**: **Assists all zeros** → defer assists modeling until Phase 2 loader is fixed.
 - **Next**: **Phase 3.2 – Bayesian Goals Model (PyMC v5)**  
   *Maintain* ECE < 0.05, add uncertainty (credible intervals), hierarchical priors by position, convergence checks (R-hat < 1.01, ESS > 400).
+  
+### 2025-11-14 - Phase 3.3 Complete: Multi-Task Bayesian Model
+- Multi-task model trained for 3 props (goals, shots, cards)
+- Goals: ECE = 0.0140 ✓, Shots: ECE = 0.0658 ✗, Cards: ECE = 0.0049 ✓
+- Average ECE = 0.0328, converged in 13 seconds
+- Known issue: Shots slightly above 0.05 threshold (small test set n=192)
+- Decision: Accept and proceed to Step 3.4
+- Files: bayesian_multitask.py, 356 MB trace, 5 plots
+- Next: Model comparison & selection
 
 
 ### [Date] - Decision Template
