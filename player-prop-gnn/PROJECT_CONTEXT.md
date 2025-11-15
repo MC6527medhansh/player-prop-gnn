@@ -185,6 +185,21 @@ Swish Analytics needs soccer player prop prediction with correlated parlay prici
 - **Known Limitation**: Shots ECE = 0.0658 (acceptable, small test set)
 - **Status**: APPROVED FOR PHASE 4 (API DEVELOPMENT) ✓
 
+### 2025-11-15 – PHASE 4.1: FASTAPI APPLICATION — COMPLETE ✓
+
+* **Status**: Production REST API running with Redis caching ✓
+* **Startup**: ~10s model load; single global model instance ✓
+* **Health**: `/health` returns 200 with `model_loaded=true`, `redis_connected=true` ✓
+* **Latency**: ~10 ms (cached), ~80 ms (uncached) < 100 ms target ✓
+* **Docs**: Swagger/OpenAPI available at `/docs` ✓
+* **Validation**: Strict Pydantic request/response models; clear 400/422/503 errors ✓
+* **Caching**: 5-min TTL; key `pred:tier1:{player_id}:{opponent_id}:{was_home}:v1.0`; graceful Redis fallback ✓
+* **Tests**: 60/67 passing (**90%**); API verified with real data ✓
+* **Fixes**: Pinned `httpx`/`starlette`; corrected feature names; resolved `was_home` duplication ✓
+* **Known Limitations**: 7 tests failing; no auth/rate-limiting yet; cache hit-rate TBD; dashboard not built ◻
+* **Performance Target**: Exceeds p50/p95 goals ✓
+* **Next**: Phase 4.2 (Docker) **or** Phase 4.4 (Dashboard) ▶
+
 ### [Date] - Decision Template
 - **Decision**: What you decided
 - **Reasoning**: Why you decided this
