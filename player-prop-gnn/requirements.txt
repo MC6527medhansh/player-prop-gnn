@@ -36,4 +36,7 @@ pytest==7.4.3
 
 # Utils
 python-dotenv==1.0.0
-tqdm==4.66.1statsbombpy==1.11.0
+tqdm==4.66.1
+statsbombpy==1.11.0
+pydantic-settings==2.0.3
+redis==5.0.0
