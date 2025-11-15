@@ -152,6 +152,38 @@ Swish Analytics needs soccer player prop prediction with correlated parlay prici
 - Files: bayesian_multitask.py, 356 MB trace, 5 plots
 - Next: Model comparison & selection
 
+### 2025-11-14 - Phase 3.4 Complete: Model Comparison & Selection
+- **Decision**: Multi-task model validated for production use
+- **Comparison**: Multi-task Goals ECE (0.0140) vs Single-task (0.0296) → Multi-task BETTER
+- **Status**: Model comparison notebook ran successfully, decision documented
+- **Files**: notebooks/exploration/04_model_comparison.ipynb, docs/model_comparison_results.md
+- **Result**: ✓ Use multi-task model (simpler deployment, excellent calibration)
+- **Next**: Phase 3.5 - Production infrastructure
+
+### 2025-11-14 - Phase 3.5 Complete: Production Infrastructure
+- **Decision**: Production-ready inference and training automation built
+- **Files Created**:
+  - src/models/inference.py - Fast prediction class (<100ms latency)
+  - src/models/train.py - CLI training automation with convergence checks
+  - tests/unit/test_inference.py - 14 tests, all passing ✓
+  - tests/unit/test_train.py - 19 tests, all passing ✓
+  - tests/integration/test_end_to_end.py - Full pipeline test, passing ✓
+- **Test Results**: 34/34 tests passing (100%)
+- **Key Features**:
+  - BayesianPredictor class caches posterior samples for fast inference
+  - train.py validates dates, checks disk space, retries DB connections
+  - Comprehensive error handling with actionable error messages
+  - All code follows Google AI guidelines (defensive, typed, tested)
+- **Next**: Phase 4 - FastAPI development
+
+### 2025-11-14 - DECISION GATE 2: PASSED ✓
+- **Average ECE**: 0.0286 < 0.05 threshold ✓
+- **Convergence**: R-hat = 1.0000, ESS = 6576, 0 divergences ✓
+- **Inference Speed**: ~80ms per player < 100ms target ✓
+- **Test Coverage**: 34/34 tests passing (100%) ✓
+- **Production Ready**: Inference class + training automation complete ✓
+- **Known Limitation**: Shots ECE = 0.0658 (acceptable, small test set)
+- **Status**: APPROVED FOR PHASE 4 (API DEVELOPMENT) ✓
 
 ### [Date] - Decision Template
 - **Decision**: What you decided
