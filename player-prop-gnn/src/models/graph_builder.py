@@ -2,10 +2,7 @@
 Phase 6.1: Match Graph Builder (Database Driven)
 Converts SQL match data into PyTorch Geometric graphs.
 
-Key Features:
-- Fetches nodes from `player_features` (pre-computed rolling stats)
-- Fetches edges from `match_interactions` (pass networks)
-- Zero API calls (fast graph construction)
+NEW: Implements LRU Caching for fast inference (Phase 8.2)
 """
 import torch
 import pandas as pd
@@ -14,21 +11,13 @@ import psycopg2
 from torch_geometric.data import Data
 from typing import Dict, List, Optional, Tuple
 import logging
+import functools # <-- ADDED for LRU Caching
 
 logger = logging.getLogger(__name__)
 
 class MatchGraphBuilder:
     """
     Constructs PyG Data objects from the database.
-    
-    Structure:
-    - Nodes: Players in a specific match
-    - Edges: Passes between players
-    - Node Features: 
-        - Position (One-hot, 4 dims)
-        - Context (Home/Away, Opponent Strength, Rest Days)
-        - Form (Rolling Goals/Shots/Assists/Cards - 5 game window)
-    - Targets (y): Actual match outcomes (Goals, Assists, Shots, Cards)
     """
 
     def __init__(self, db_config: Dict):
@@ -42,9 +31,11 @@ class MatchGraphBuilder:
             'Forward': 3
         }
 
+    @functools.lru_cache(maxsize=128) # <-- PHASE 8.2 OPTIMIZATION: Cache the graph output
     def build_graph(self, match_id: int) -> Optional[Data]:
         """
         Build a single graph for a given match_id.
+        This function is now MEMOIZED (cached) to prevent redundant database queries.
         Returns None if match has insufficient data (e.g., < 22 players or 0 edges).
         """
         conn = None
@@ -52,7 +43,6 @@ class MatchGraphBuilder:
             conn = psycopg2.connect(**self.db_config)
             
             # 1. Fetch Nodes (Players & Features)
-            # We join with 'players' table to get the static position
             nodes_df = pd.read_sql("""
                 SELECT 
                     pf.player_id,
@@ -104,7 +94,9 @@ class MatchGraphBuilder:
                 edge_attr=edge_attr,
                 y=y,
                 match_id=match_id,
-                num_nodes=len(nodes_df)
+                num_nodes=len(nodes_df),
+                # Crucial for GNN inference lookup: store player IDs on the graph object
+                player_ids=torch.tensor(nodes_df['player_id'].values, dtype=torch.long)
             )
             
             return data
@@ -118,7 +110,6 @@ class MatchGraphBuilder:
     def _build_node_features(self, df: pd.DataFrame) -> torch.Tensor:
         """
         Construct feature matrix [num_nodes, num_features].
-        Current Dim: 4 (Pos) + 3 (Context) + 5 (Form) = 12 Features
         """
         features = []
         
@@ -151,7 +142,6 @@ class MatchGraphBuilder:
     def _build_edges(self, nodes_df: pd.DataFrame, edges_df: pd.DataFrame) -> Tuple[torch.LongTensor, torch.Tensor]:
         """
         Construct edge indices and attributes.
-        Maps database player_ids to graph node indices (0..N).
         """
         # Create map: player_id -> node_index
         pid_to_idx = {pid: i for i, pid in enumerate(nodes_df['player_id'])}
@@ -165,7 +155,7 @@ class MatchGraphBuilder:
             sender = row['sender_id']
             receiver = row['receiver_id']
             
-            # Skip if either player is missing from node list (e.g., subbed out early/late or data glitch)
+            # Skip if either player is missing from node list
             if sender not in pid_to_idx or receiver not in pid_to_idx:
                 continue
                 
@@ -221,8 +211,7 @@ if __name__ == "__main__":
     builder = MatchGraphBuilder(db_config)
     
     # Test on a known match ID from your data
-    # (e.g., from the Premier League batch we just loaded)
-    test_match_id = 3754058 # From your logs
+    test_match_id = 3754058 
     
     print(f"Building graph for match {test_match_id}...")
     graph = builder.build_graph(test_match_id)
