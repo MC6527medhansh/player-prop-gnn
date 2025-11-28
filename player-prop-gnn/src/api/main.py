@@ -1,13 +1,12 @@
 """
 FastAPI Application for Player Prop Prediction
-Phase 4.3 - WITH MONITORING AND COMPLETE BUG FIXES
+Phase 7.3 - INTEGRATED PARLAY PRICING & MONITORING
 
-FIXES APPLIED:
-1. Cache key now includes position and features hash
-2. Cached field correctly set to true for cache hits
-3. Structured JSON logging
-4. Prometheus metrics
-5. Request ID tracking
+FEATURES:
+1. Tier 1 (Bayesian) Prediction Endpoint
+2. Tier 2 (GNN) Parlay Pricing Endpoint
+3. Full Monitoring (Prometheus, JSON Logging)
+4. Redis Caching
 """
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
@@ -18,18 +17,21 @@ from typing import Optional
 import time
 import hashlib
 import json
+import redis
 
-from src.models.inference import BayesianPredictor, ModelNotLoadedError
+# Import core modules
+from src.models.inference import BayesianPredictor
 from src.config.settings import settings
+from src.utils.logging import setup_logging, RequestLogger
+
+# Import API components
 from .schemas import (
     PlayerPredictionRequest,
     PlayerPredictionResponse,
-    PropPrediction,
-    ErrorResponse
+    PropPrediction
 )
 from .middleware import setup_middleware
-from src.utils.logging import setup_logging, RequestLogger
-from src.api.metrics import (
+from .metrics import (
     get_metrics,
     initialize_metrics,
     record_cache_hit,
@@ -38,324 +40,164 @@ from src.api.metrics import (
     record_prediction_error,
     MODEL_LOADED,
     REDIS_CONNECTED,
-    INFERENCE_DURATION,
-    TimedContext
+    INFERENCE_DURATION
 )
-import redis
+
+# Import the new Parlay Router
+from src.api import parlay_routes
 
 # ============================================================================
-# CONFIGURE LOGGING (Before anything else)
+# CONFIGURE LOGGING
 # ============================================================================
-
-# Use JSON logging in production, plain text in development
 format_json = settings.LOG_LEVEL.upper() != 'DEBUG'
 logger = setup_logging(
     level=settings.LOG_LEVEL,
     format_json=format_json,
-    log_file=None  # Docker captures stdout
+    log_file=None
 )
 
 # ============================================================================
 # GLOBAL STATE
 # ============================================================================
-
 MODEL: Optional[BayesianPredictor] = None
 REDIS_CLIENT: Optional[redis.Redis] = None
 
 # ============================================================================
 # CREATE FASTAPI APP
 # ============================================================================
-
 app = FastAPI(
     title="Player Prop Prediction API",
-    description="Bayesian multi-task model for football player prop predictions",
-    version="1.0.0",
+    description="Bayesian + GNN system for football player prop predictions",
+    version="2.0.0",  # Bumped version for GNN integration
     docs_url="/docs",
     redoc_url="/redoc"
 )
 
-# Add monitoring middleware (request tracking, metrics, error handling)
+# Setup Middleware
 setup_middleware(app)
+
+# REGISTER ROUTERS
+# This hooks the Parlay Pricing Engine into the main API
+app.include_router(parlay_routes.router, prefix="/parlay", tags=["Parlay Pricing"])
 
 # ============================================================================
 # LIFECYCLE EVENTS
 # ============================================================================
-
 @app.on_event("startup")
 async def startup_event():
-    """
-    Load model and connect to Redis on application startup.
-    
-    BUGFIX: Properly update metrics gauges
-    """
+    """Load model and connect to Redis on startup."""
     global MODEL, REDIS_CLIENT
     
-    # Initialize metrics
     initialize_metrics()
     
     logger.info("=" * 60)
-    logger.info("STARTING PLAYER PROP API WITH MONITORING")
+    logger.info("STARTING PLAYER PROP API (TIER 1 + TIER 2)")
     logger.info("=" * 60)
     
-    # ========================================
-    # LOAD MODEL (REQUIRED)
-    # ========================================
-    
+    # 1. LOAD BAYESIAN MODEL (Tier 1)
     model_path = settings.model_path / "bayesian_multitask_v1.0.pkl"
     trace_path = settings.model_path / "bayesian_multitask_v1.0_trace.nc"
     
-    logger.info(f"Loading model from {model_path}")
+    logger.info(f"Loading Tier 1 model from {model_path}")
     
     try:
         start_time = time.time()
-        MODEL = BayesianPredictor(
-            str(model_path),
-            str(trace_path),
-            n_samples=1000
-        )
-        load_time_ms = int((time.time() - start_time) * 1000)
-        
-        # Update metric
-        MODEL_LOADED.set(1)
-        
-        logger.info(
-            "Model loaded successfully",
-            extra={
-                'load_time_ms': load_time_ms,
-                'n_samples': MODEL.n_samples,
-                'n_features': len(MODEL.feature_names)
-            }
-        )
-        
-    except FileNotFoundError as e:
-        MODEL_LOADED.set(0)
-        logger.critical(
-            "Model files not found - API cannot start",
-            extra={'error': str(e)}
-        )
-        raise RuntimeError("Cannot start API without model files")
-        
+        # Ensure directory exists before loading
+        if not model_path.exists():
+             logger.warning(f"Model file not found at {model_path}. Running in limited mode (Parlay-only or Mock).")
+        else:
+            MODEL = BayesianPredictor(str(model_path), str(trace_path), n_samples=1000)
+            MODEL_LOADED.set(1)
+            logger.info("Tier 1 Model loaded successfully")
+            
     except Exception as e:
         MODEL_LOADED.set(0)
-        logger.critical(
-            "Failed to load model",
-            extra={'error': str(e)},
-            exc_info=True
-        )
-        raise RuntimeError(f"Model loading error: {e}")
+        logger.error(f"Failed to load Tier 1 model: {e}")
     
-    # ========================================
-    # CONNECT TO REDIS (OPTIONAL)
-    # ========================================
-    
+    # 2. CONNECT TO REDIS
     logger.info(f"Connecting to Redis at {settings.REDIS_HOST}:{settings.REDIS_PORT}")
-    
     try:
         REDIS_CLIENT = redis.Redis(
             host=settings.REDIS_HOST,
             port=settings.REDIS_PORT,
             db=settings.REDIS_DB,
             decode_responses=True,
-            socket_timeout=5,
-            socket_connect_timeout=5
+            socket_timeout=5
         )
-        
-        # Test connection
         REDIS_CLIENT.ping()
-        
-        # Update metric
         REDIS_CONNECTED.set(1)
-        
         logger.info("Redis connected successfully")
-        
-    except redis.ConnectionError as e:
-        REDIS_CONNECTED.set(0)
-        logger.warning(
-            "Failed to connect to Redis - API will run without caching",
-            extra={'error': str(e)}
-        )
-        REDIS_CLIENT = None
-        
     except Exception as e:
         REDIS_CONNECTED.set(0)
-        logger.warning(
-            "Unexpected Redis error - API will run without caching",
-            extra={'error': str(e)}
-        )
+        logger.warning(f"Redis connection failed: {e}")
         REDIS_CLIENT = None
     
     logger.info("API ready to serve requests")
 
-
 @app.on_event("shutdown")
 async def shutdown_event():
-    """
-    Cleanup on application shutdown.
-    """
     global REDIS_CLIENT
-    
-    logger.info("=" * 60)
-    logger.info("SHUTTING DOWN PLAYER PROP API")
-    logger.info("=" * 60)
-    
-    # Update metrics
-    MODEL_LOADED.set(0)
-    REDIS_CONNECTED.set(0)
-    
-    if REDIS_CLIENT is not None:
-        try:
-            REDIS_CLIENT.close()
-            logger.info("Redis connection closed")
-        except Exception as e:
-            logger.warning(
-                "Error closing Redis",
-                extra={'error': str(e)}
-            )
-    
-    logger.info("Shutdown complete")
-
+    logger.info("Shutting down API")
+    if REDIS_CLIENT:
+        REDIS_CLIENT.close()
 
 # ============================================================================
-# ENDPOINTS
+# CORE ENDPOINTS
 # ============================================================================
 
 @app.get("/health")
 async def health_check():
-    """
-    Health check endpoint for monitoring.
-    """
-    # Check Redis connection
-    redis_connected = False
-    if REDIS_CLIENT is not None:
-        try:
-            REDIS_CLIENT.ping()
-            redis_connected = True
-        except:
-            redis_connected = False
-    
-    health_status = {
-        "status": "healthy" if MODEL is not None else "unhealthy",
+    """Health check endpoint."""
+    return {
+        "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "model_loaded": MODEL is not None,
-        "redis_connected": redis_connected,
-        "version": "1.0.0"
+        "tier1_loaded": MODEL is not None,
+        "redis_connected": REDIS_CLIENT is not None,
+        "version": "2.0.0"
     }
-    
-    # Return 503 if model not loaded
-    if MODEL is None:
-        health_status["errors"] = ["Model not loaded"]
-        return JSONResponse(
-            status_code=503,
-            content=health_status
-        )
-    
-    # Warning if Redis down (not critical)
-    if not redis_connected:
-        health_status["warnings"] = ["Redis not connected - caching disabled"]
-    
-    return health_status
-
 
 @app.get("/metrics")
 async def metrics():
-    """
-    Prometheus metrics endpoint.
-    """
-    return Response(
-        content=get_metrics(),
-        media_type="text/plain; version=0.0.4; charset=utf-8"
-    )
-
+    """Prometheus metrics."""
+    return Response(content=get_metrics(), media_type="text/plain")
 
 @app.post("/predict/player", response_model=PlayerPredictionResponse)
 async def predict_player(request: PlayerPredictionRequest, http_request: Request):
     """
-    Predict props for a single player with Redis caching.
-    
-    BUGFIX: Cache key now includes position and features hash
-    BUGFIX: Correctly sets cached=true for cache hits
+    Tier 1 Prediction: Single Player Props.
     """
-    # Get request ID (from middleware)
     request_id = getattr(http_request.state, 'request_id', 'unknown')
     req_logger = RequestLogger(logger, request_id)
     
-    # Check model loaded
     if MODEL is None:
-        req_logger.error("Prediction requested but model not loaded")
-        record_prediction_error('model')
-        raise HTTPException(
-            status_code=503,
-            detail="Model not loaded. API is starting up or failed to load model."
-        )
+        record_prediction_error('model_missing')
+        raise HTTPException(status_code=503, detail="Tier 1 Model not loaded")
     
-    # ========================================
-    # BUILD CACHE KEY (FIXED)
-    # ========================================
-    
-    # Create deterministic hash of features (order-independent)
+    # --- CACHE KEY GENERATION ---
     features_json = json.dumps(request.features, sort_keys=True)
     features_hash = hashlib.md5(features_json.encode()).hexdigest()[:8]
     
-    # Include ALL inputs that affect prediction
     cache_key = (
-        f"pred:tier1:"
-        f"{request.player_id}:"
-        f"{request.opponent_id}:"
-        f"{request.position}:"
-        f"{request.was_home}:"
-        f"{features_hash}:"
-        f"v1.0"
+        f"pred:tier1:{request.player_id}:{request.opponent_id}:"
+        f"{request.position}:{request.was_home}:{features_hash}:v1.0"
     )
     
-    req_logger.debug(
-        "Cache key generated",
-        extra={'cache_key': cache_key, 'features_hash': features_hash}
-    )
-    
-    # ========================================
-    # CHECK CACHE (if Redis available)
-    # ========================================
-    
-    cached_result = None
-    
-    if REDIS_CLIENT is not None:
+    # --- CACHE READ ---
+    if REDIS_CLIENT:
         try:
-            cached_result = REDIS_CLIENT.get(cache_key)
-            if cached_result:
-                # Cache HIT
+            cached = REDIS_CLIENT.get(cache_key)
+            if cached:
                 record_cache_hit()
-                req_logger.info(
-                    "Prediction served from cache",
-                    extra={
-                        'player_id': request.player_id,
-                        'position': request.position,
-                        'cache_key': cache_key
-                    }
-                )
-                response_dict = json.loads(cached_result)
-                
-                # BUGFIX: Update cached field to true
-                response_dict['cached'] = True
-                
-                return PlayerPredictionResponse(**response_dict)
-        except Exception as e:
+                resp = json.loads(cached)
+                resp['cached'] = True
+                return PlayerPredictionResponse(**resp)
+        except Exception:
             record_cache_error('read')
-            req_logger.warning(
-                "Cache read failed",
-                extra={'error': str(e), 'cache_key': cache_key}
-            )
-            # Continue without cache
-    
-    # ========================================
-    # CACHE MISS: Make fresh prediction
-    # ========================================
-    
+            
+    # --- INFERENCE ---
     record_cache_miss()
-    
     try:
         start_time = time.time()
-        
-        # Make prediction
         result = MODEL.predict_player(
             player_id=request.player_id,
             opponent_id=request.opponent_id,
@@ -363,101 +205,43 @@ async def predict_player(request: PlayerPredictionRequest, http_request: Request
             was_home=request.was_home,
             features=request.features
         )
+        duration = int((time.time() - start_time) * 1000)
         
-        inference_time_ms = int((time.time() - start_time) * 1000)
-        
-        # Track inference time per prop (for debugging slow predictions)
-        for prop_type in ['goals', 'shots', 'cards']:
-            INFERENCE_DURATION.labels(prop_type=prop_type).observe(
-                inference_time_ms / 1000.0 / 3  # Approximate per-prop time
-            )
-        
-        # Convert to response format
+        # Record metrics
+        for prop in ['goals', 'shots', 'cards']:
+            INFERENCE_DURATION.labels(prop_type=prop).observe(duration / 1000.0 / 3)
+            
         response = PlayerPredictionResponse(
             player_id=request.player_id,
             opponent_id=request.opponent_id,
             position=request.position,
             was_home=request.was_home,
             predictions={
-                "goals": PropPrediction(**result['goals']),
-                "shots": PropPrediction(**result['shots']),
-                "cards": PropPrediction(**result['cards'])
+                k: PropPrediction(**v) for k,v in result.items()
             },
             cached=False,
-            inference_time_ms=inference_time_ms,
+            inference_time_ms=duration,
             model_version="v1.0",
             timestamp=datetime.now().isoformat()
         )
         
-        # ========================================
-        # STORE IN CACHE (if Redis available)
-        # ========================================
-        
-        if REDIS_CLIENT is not None:
+        # --- CACHE WRITE ---
+        if REDIS_CLIENT:
             try:
-                response_json = response.json()
-                REDIS_CLIENT.setex(cache_key, 300, response_json)
-                req_logger.info(
-                    "Prediction cached",
-                    extra={
-                        'cache_key': cache_key,
-                        'position': request.position,
-                        'ttl_seconds': 300
-                    }
-                )
-            except Exception as e:
+                REDIS_CLIENT.setex(cache_key, 300, response.json())
+            except Exception:
                 record_cache_error('write')
-                req_logger.warning(
-                    "Cache write failed",
-                    extra={'error': str(e), 'cache_key': cache_key}
-                )
-        
-        req_logger.info(
-            "Prediction completed",
-            extra={
-                'player_id': request.player_id,
-                'position': request.position,
-                'inference_time_ms': inference_time_ms,
-                'cached': False
-            }
-        )
-        
+                
         return response
-        
+
     except ValueError as e:
-        # Input validation error
         record_prediction_error('validation')
-        req_logger.warning(
-            "Invalid input for prediction",
-            extra={'error': str(e), 'player_id': request.player_id}
-        )
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid input: {str(e)}"
-        )
-        
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        # Unexpected error
         record_prediction_error('unknown')
-        req_logger.error(
-            "Prediction failed with unexpected error",
-            extra={'error': str(e), 'player_id': request.player_id}
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=f"Prediction failed: {str(e)}"
-        )
-
-
-# ============================================================================
-# RUN (for development only)
-# ============================================================================
+        req_logger.error(f"Prediction failed: {e}")
+        raise HTTPException(status_code=500, detail="Internal inference error")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        app,
-        host=settings.API_HOST,
-        port=settings.API_PORT,
-        log_level=settings.LOG_LEVEL.lower()
-    )
+    uvicorn.run(app, host="0.0.0.0", port=8000)
