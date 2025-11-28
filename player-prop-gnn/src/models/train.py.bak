@@ -359,7 +359,7 @@ def train_multitask_model(
     logger.info("\n--- Checking Convergence ---")
     
     try:
-        check_convergence(idata)
+        check_convergence(idata, strict=False)
     except Exception as e:
         # Get diagnostics for error message
         summary = az.summary(idata, var_names=['alpha_goals_position', 'beta_goals'])

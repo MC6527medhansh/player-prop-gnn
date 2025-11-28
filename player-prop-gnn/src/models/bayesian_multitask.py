@@ -8,6 +8,7 @@ Key Features:
 3. HARD BOUNDS on log(λ) for each prop
 4. Independent opponent effects per prop
 5. Prop-specific feature coefficients
+6. ORDERED position effects for GOALS (FW ≥ MF ≥ DF ≥ GK)
 
 Model Specification:
     For k ∈ {goals, shots, cards}:
@@ -17,7 +18,9 @@ Model Specification:
     Shared hierarchy:
     σ_α ~ TruncatedNormal(0, 0.12, upper=0.25)  [SHARED]
     μ_α_k ~ Normal(log(mean_k), 0.15)           [per-prop]
-    α_k,pos ~ Normal(μ_α_k, σ_α)                [uses shared σ]
+    α_goals,position uses ordered construction with σ_α
+    α_shots,position ~ Normal(μ_α_shots, σ_α)
+    α_cards,position ~ Normal(μ_α_cards, σ_α)
     
     Independent effects:
     γ_k,opp ~ Normal(0, 0.10)                   [per-prop]
@@ -41,6 +44,9 @@ from typing import Dict, Tuple, List
 from pathlib import Path
 import warnings
 warnings.filterwarnings('ignore')
+
+# Needed for ordered goals position effects
+import pytensor.tensor as pt
 
 
 def load_data(db_url='postgresql://medhanshchoubey@localhost:5432/football_props'):
@@ -93,7 +99,6 @@ def load_data(db_url='postgresql://medhanshchoubey@localhost:5432/football_props
         raise ValueError(f"Missing required columns: {missing}")
     
     # CRITICAL: Convert match_date to pd.Timestamp for consistent comparisons
-    # Database might return datetime.date, string, or datetime
     df['match_date'] = pd.to_datetime(df['match_date'])
     
     # Enforce integer types for count data (critical for Poisson)
@@ -178,7 +183,6 @@ def _prep_multitask_inputs(df: pd.DataFrame) -> Tuple[Dict, Dict, Dict, np.ndarr
     # Check for unmapped opponents
     if np.any(pd.isna(opp_idx)):
         raise ValueError("Some opponents could not be mapped")
-    
     opp_idx = opp_idx.astype(np.int64)
     
     indices = {
@@ -317,17 +321,42 @@ def build_multitask_model(df: pd.DataFrame) -> Tuple[pm.Model, Dict]:
         print(f"   μ_α_cards ~ Normal({np.log(mean_cards):.3f}, 0.15)")
         
         # ========================================
-        # POSITION EFFECTS (SHARED σ_α)
+        # POSITION EFFECTS
+        #  - GOALS uses ORDERED construction: GK < DF < MF < FW
+        #  - SHOTS, CARDS remain Normal with shared σ_α
         # ========================================
-        print(f"\n3. Position Effects (using shared σ_α):")
+        print(f"\n3. Position Effects:")
+        print(f"   Goals: enforced order (FW ≥ MF ≥ DF ≥ GK) via increments using σ_α")
         
-        alpha_goals_pos = pm.Normal(
+        # Ordered effects for GOALS
+        pos_order = coords['position']  # keep whatever order is in coords
+        # Base around μ_α_goals with shared σ_α
+        alpha_base_goals = pm.Normal("alpha_base_goals", mu=mu_alpha_goals, sigma=sigma_alpha)
+        # Non-negative increments, scaled by shared σ_α
+        d_def_goals = pm.HalfNormal("d_def_goals", sigma=sigma_alpha)  # GK -> DF
+        d_mid_goals = pm.HalfNormal("d_mid_goals", sigma=sigma_alpha)  # DF -> MF
+        d_fw_goals  = pm.HalfNormal("d_fw_goals",  sigma=sigma_alpha)  # MF -> FW
+        
+        alpha_gk = alpha_base_goals
+        alpha_df = alpha_gk + d_def_goals
+        alpha_mf = alpha_df + d_mid_goals
+        alpha_fw = alpha_mf + d_fw_goals
+        
+        alpha_map_goals = {
+            "Goalkeeper": alpha_gk,
+            "Defender":   alpha_df,
+            "Midfielder": alpha_mf,
+            "Forward":    alpha_fw,
+        }
+        # Stack in the coords order
+        alpha_goals_vec = pt.stack([alpha_map_goals[p] for p in pos_order])
+        alpha_goals_pos = pm.Deterministic(
             'alpha_goals_position',
-            mu=mu_alpha_goals,
-            sigma=sigma_alpha,
-            dims='position'
+            alpha_goals_vec,
+            dims=('position',)
         )
         
+        # SHOTS & CARDS (unchanged; still share σ_α)
         alpha_shots_pos = pm.Normal(
             'alpha_shots_position',
             mu=mu_alpha_shots,
@@ -341,7 +370,7 @@ def build_multitask_model(df: pd.DataFrame) -> Tuple[pm.Model, Dict]:
             sigma=sigma_alpha,
             dims='position'
         )
-        print(f"   All position effects use same σ_α")
+        print(f"   Shots/Cards: Normal(μ_α_k, σ_α) with shared σ_α")
         
         # ========================================
         # OPPONENT EFFECTS (INDEPENDENT, TIGHT)

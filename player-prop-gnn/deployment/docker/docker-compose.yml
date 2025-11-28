@@ -1,11 +1,6 @@
-version: '3.8'
-
 # ============================================================================
 # Player Prop GNN - Docker Compose Configuration
-# Location: deployment/docker/docker-compose.yml
-# ============================================================================
-# ⚠️  SECURITY: All secrets MUST be in .env (at project root)
-# Run from this directory: docker-compose up -d
+# Phase 4.4 - WITH DASHBOARD
 # ============================================================================
 
 services:
@@ -81,6 +76,35 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  # ============================================================================
+  # NEW: Dashboard Service (Phase 4.4)
+  # ============================================================================
+  
+  dashboard:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile.api
+    container_name: football_props_dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      - API_URL=http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - ../../src:/app/src:ro
+    networks:
+      - prop_network
+    restart: unless-stopped
+    command: streamlit run src/dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
 volumes:
   postgres_data:
