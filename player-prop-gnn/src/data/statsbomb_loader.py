@@ -1,6 +1,7 @@
 from statsbombpy import sb
 import pandas as pd
-from typing import Dict, Optional
+import numpy as np
+from typing import Dict, List, Optional, Tuple
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -9,175 +10,151 @@ logger = logging.getLogger(__name__)
 class StatsBombLoader:
     
     @staticmethod
-    def get_available_competitions():
-        return sb.competitions()
-    
-    @staticmethod
     def get_matches(competition_id, season_id):
         return sb.matches(competition_id=competition_id, season_id=season_id)
     
     @staticmethod
     def load_match_events(match_id):
-        events = sb.events(match_id=match_id)
-        return events
+        return sb.events(match_id=match_id)
     
     @staticmethod
-    def extract_player_match_stats(events, player_id):
+    def _map_position(raw_pos: str) -> str:
+        """
+        Map detailed StatsBomb positions to the 4 DB-allowed categories.
+        Logic aligns with Tier 1 training data.
+        """
+        pos = str(raw_pos).lower()
+        
+        # Priority mapping (Goalkeeper first)
+        if 'goalkeeper' in pos or 'keeper' in pos:
+            return 'Goalkeeper'
+            
+        # Defenders (Center Backs, Full Backs, Wing Backs)
+        if any(x in pos for x in ['back', 'defender', 'defense']):
+            return 'Defender'
+            
+        # Forwards (Strikers, Wings, Attacking Midfielders often act as FWDs)
+        # Note: 'Right Wing' -> Forward, 'Attacking Midfield' -> Forward (aggressive mapping)
+        if any(x in pos for x in ['forward', 'striker', 'wing', 'attacking']):
+            return 'Forward'
+            
+        # Midfielders (Defensive Mids, Center Mids)
+        if any(x in pos for x in ['midfield', 'central']):
+            return 'Midfielder'
+            
+        # Default Fallback
+        return 'Midfielder'
+
+    @staticmethod
+    def extract_player_match_stats(events: pd.DataFrame, player_id: int) -> Optional[Dict]:
+        """
+        Extract robust stats for a single player in a match.
+        """
         player_events = events[events['player_id'] == player_id].copy()
         
         if player_events.empty:
             return None
         
-        # Get player name - handle different column names
-        player_name = None
+        # Robust Name Extraction
+        player_name = f"Player_{player_id}"
         if 'player' in player_events.columns:
             player_name = str(player_events['player'].iloc[0])
         elif 'player_name' in player_events.columns:
             player_name = str(player_events['player_name'].iloc[0])
-        else:
-            player_name = f"Player_{player_id}"
-        
-        # Get team name
-        team_name = None
+            
+        # Robust Team Name
+        team_name = "Unknown"
         if 'team' in player_events.columns:
             team_name = str(player_events['team'].iloc[0])
         elif 'team_name' in player_events.columns:
             team_name = str(player_events['team_name'].iloc[0])
-        else:
-            team_name = "Unknown"
-        
+            
         stats = {
             'player_id': int(player_id),
             'player_name': player_name,
             'team_name': team_name,
         }
         
-        # Extract position
+        # Position Mapping (THE FIX)
+        raw_pos = 'Midfielder'
         if 'position' in player_events.columns:
-            position = player_events['position'].iloc[0]
-            if pd.notna(position):
-                stats['position'] = str(position)
+            found_pos = player_events['position'].dropna()
+            if not found_pos.empty:
+                raw_pos = found_pos.iloc[0]
         
-        # Goals
-        shots = player_events[player_events['type'] == 'Shot']
-        if 'shot_outcome' in shots.columns:
-            stats['goals'] = int(len(shots[shots['shot_outcome'] == 'Goal']))
-            stats['total_shots'] = int(len(shots))
-            stats['shots_on_target'] = int(len(shots[shots['shot_outcome'].isin(['Goal', 'Saved', 'Saved To Post'])]))
-        else:
-            stats['goals'] = 0
-            stats['total_shots'] = 0
-            stats['shots_on_target'] = 0
-        
-        # Assists
-        stats['assists'] = StatsBombLoader._count_assists(events, player_id)
-        
-        # Cards
-        cards = StatsBombLoader._extract_cards(player_events)
-        stats['yellow_cards'] = cards['yellow']
-        stats['red_cards'] = cards['red']
-        
-        # Minutes
-        if 'minute' in player_events.columns:
-            max_minute = player_events['minute'].max()
-            stats['minutes_played'] = int(max_minute) if pd.notna(max_minute) else 0
-        else:
-            stats['minutes_played'] = 0
-        
-        return stats
-    
-    @staticmethod
-    def _count_assists(events, player_id):
-        assists = 0
-        player_passes = events[(events['player_id'] == player_id) & (events['type'] == 'Pass')].copy()
-        
-        if player_passes.empty:
-            return 0
-        
-        pass_recipient_col = 'pass_recipient_id' if 'pass_recipient_id' in player_passes.columns else 'pass_recipient'
-        if pass_recipient_col not in player_passes.columns:
-            return 0
-        
-        for idx, pass_event in player_passes.iterrows():
-            recipient_id = pass_event.get(pass_recipient_col)
-            if pd.isna(recipient_id):
-                continue
+        stats['position'] = StatsBombLoader._map_position(raw_pos)
             
-            pass_time = pass_event.get('second', 0)
-            next_events = events[
-                (events['second'] > pass_time) &
-                (events['second'] <= pass_time + 10) &
-                (events['player_id'] == recipient_id) &
-                (events['type'] == 'Shot')
-            ]
+        # --- ROBUST METRICS ---
+        
+        # 1. Goals
+        stats['goals'] = 0
+        stats['total_shots'] = 0
+        stats['shots_on_target'] = 0
+        
+        if 'shot_outcome' in player_events.columns:
+            shots = player_events[player_events['type'] == 'Shot']
+            stats['total_shots'] = len(shots)
+            stats['goals'] = len(shots[shots['shot_outcome'] == 'Goal'])
+            stats['shots_on_target'] = len(shots[shots['shot_outcome'].isin(['Goal', 'Saved', 'Saved to Post', 'Saved Off Target'])])
             
-            if not next_events.empty and 'shot_outcome' in next_events.columns:
-                if (next_events['shot_outcome'] == 'Goal').any():
-                    assists += 1
+        # 2. Assists (Fixes deprecation warning too)
+        stats['assists'] = 0
+        if 'pass_goal_assist' in player_events.columns:
+            # fillna(False) avoids the FutureWarning about downcasting
+            stats['assists'] = int(player_events['pass_goal_assist'].fillna(False).astype(bool).sum())
         
-        return assists
-    
-    @staticmethod
-    def _extract_cards(player_events):
-        yellow_count = 0
-        red_count = 0
-        
+        # 3. Cards
+        yellow = 0
+        red = 0
         if 'foul_committed_card' in player_events.columns:
-            card_events = player_events[player_events['foul_committed_card'].notna()]
-            for card in card_events['foul_committed_card']:
-                card_str = str(card).lower()
-                if 'yellow' in card_str:
-                    yellow_count += 1
-                if 'red' in card_str or 'second yellow' in card_str:
-                    red_count += 1
+            cards = player_events['foul_committed_card'].dropna()
+            for card in cards:
+                c = str(card).lower()
+                if 'yellow' in c:
+                    yellow += 1
+                if 'red' in c:
+                    red += 1
+        stats['yellow_cards'] = yellow
+        stats['red_cards'] = red
         
-        return {'yellow': yellow_count, 'red': red_count}
-    
-    def load_world_cup_2018(self):
-        comps = self.get_available_competitions()
-        wc = comps[comps['competition_name'] == 'FIFA World Cup']
-        wc_2018 = wc[wc['season_name'] == '2018']
-        
-        if wc_2018.empty:
-            raise ValueError("World Cup 2018 not found")
-        
-        comp_id = int(wc_2018.iloc[0]['competition_id'])
-        season_id = int(wc_2018.iloc[0]['season_id'])
-        
-        logger.info(f"Found World Cup 2018: competition_id={comp_id}, season_id={season_id}")
-        
-        matches = self.get_matches(comp_id, season_id)
-        logger.info(f"Loading {len(matches)} matches...")
-        
-        all_player_stats = []
-        
-        for idx, match_row in matches.iterrows():
-            match_id = match_row['match_id']
-            logger.info(f"Processing match {idx+1}/{len(matches)}: {match_row['home_team']} vs {match_row['away_team']}")
+        # 4. Minutes
+        stats['minutes_played'] = 0
+        if 'minute' in player_events.columns:
+            stats['minutes_played'] = int(player_events['minute'].max())
             
-            try:
-                events = self.load_match_events(match_id)
-                player_ids = events['player_id'].dropna().unique()
-                
-                for player_id in player_ids:
-                    stats = self.extract_player_match_stats(events, player_id)
-                    
-                    if stats:
-                        stats['match_id'] = int(match_id)
-                        stats['match_date'] = str(match_row['match_date'])
-                        stats['home_team'] = str(match_row['home_team'])
-                        stats['away_team'] = str(match_row['away_team'])
-                        stats['was_home'] = stats['team_name'] == match_row['home_team']
-                        all_player_stats.append(stats)
+        return stats
+
+    @staticmethod
+    def extract_pass_network(events: pd.DataFrame) -> List[Tuple]:
+        """
+        Extract directed edges (Passes) for Graph Construction.
+        Returns list of (sender_id, receiver_id, success_bool, timestamp)
+        """
+        if 'type' not in events.columns or 'player_id' not in events.columns:
+            return []
             
-            except Exception as e:
-                logger.error(f"Error processing match {match_id}: {e}")
+        passes = events[events['type'] == 'Pass'].copy()
+        
+        recipient_col = 'pass_recipient_id' if 'pass_recipient_id' in passes.columns else None
+        if recipient_col is None:
+            return []
+
+        outcome_col = 'pass_outcome' if 'pass_outcome' in passes.columns else None
+        
+        edges = []
+        for _, row in passes.iterrows():
+            sender = row['player_id']
+            receiver = row[recipient_col]
+            
+            if pd.isna(receiver):
                 continue
-        
-        player_stats_df = pd.DataFrame(all_player_stats)
-        logger.info(f"Loaded {len(player_stats_df)} player-match records from {len(matches)} matches")
-        
-        return {
-            'matches': matches,
-            'player_stats': player_stats_df,
-        }
+                
+            success = True
+            if outcome_col and pd.notna(row[outcome_col]):
+                success = False
+                
+            timestamp = int(row.get('minute', 0) * 60 + row.get('second', 0))
+            
+            edges.append((int(sender), int(receiver), success, timestamp))
+            
+        return edges

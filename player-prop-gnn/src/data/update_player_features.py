@@ -1,18 +1,62 @@
 """
 Update player_features table with newly loaded competition data.
+SAFE VERSION: Loads credentials from environment.
 """
 import psycopg2
 import logging
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def get_db_config():
+    """Load DB config securely from .env file."""
+    # Resolve paths to find .env (Project Root or Docker dir)
+    current_script = Path(__file__).resolve()
+    project_root = current_script.parent.parent.parent
+    
+    env_paths = [
+        project_root / '.env',
+        project_root / 'deployment' / 'docker' / '.env'
+    ]
+    
+    env_loaded = False
+    for path in env_paths:
+        if path.exists():
+            load_dotenv(path)
+            env_loaded = True
+            break
+    
+    if not env_loaded:
+        logger.warning("⚠️ .env file not found. Relying on system environment variables.")
+
+    # Get credentials from environment
+    return {
+        'host': os.getenv('DATABASE_HOST', 'localhost'),
+        'port': int(os.getenv('DATABASE_PORT', 5432)),
+        'database': os.getenv('DATABASE_NAME', 'football_props'),
+        'user': os.getenv('DATABASE_USER', 'postgres'),
+        'password': os.getenv('DATABASE_PASSWORD') # No default here for security
+    }
+
 def update_player_features(db_config):
     """
     Populate/update player_features table with all matches.
-    Uses same SQL logic as before but for ALL competitions.
     """
-    conn = psycopg2.connect(**db_config)
+    # Fail fast if password is missing
+    if not db_config.get('password'):
+        logger.error("❌ CRITICAL: No database password found in environment variables.")
+        logger.error("   Please ensure DATABASE_PASSWORD is set in your .env file.")
+        return
+
+    try:
+        conn = psycopg2.connect(**db_config)
+    except Exception as e:
+        logger.error(f"❌ Connection failed: {e}")
+        return
+
     cursor = conn.cursor()
     
     try:
@@ -63,13 +107,7 @@ def update_player_features(db_config):
         conn.close()
 
 if __name__ == '__main__':
-    db_config = {
-        'host': 'localhost',
-        'port': 5432,
-        'database': 'football_props',
-        'user': 'postgres',
-        'password': 'rsTKEn2JcfsJujMghw589SMCkvT/3lT1cqF1xf3Y6Y8='
-    }
-    
+    # Load config securely
+    db_config = get_db_config()
     update_player_features(db_config)
     print("\n✅ Done! Ready for GNN training.")
