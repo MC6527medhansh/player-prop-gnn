@@ -236,14 +236,6 @@ This is a solo portfolio project, but feedback is welcome! Please open an issue 
 
 MIT License - See LICENSE file for details
 
-## 👤 Author
-
-**Your Name**
-- Portfolio: [your-portfolio-site.com]
-- GitHub: [@yourusername](https://github.com/yourusername)
-- LinkedIn: [linkedin.com/in/yourprofile]
-- Email: your.email@example.com
-
 ## 🙏 Acknowledgments
 
 - **StatsBomb**: Open event data
@@ -252,22 +244,3 @@ MIT License - See LICENSE file for details
 - **Friends of Tracking**: Soccer analytics education
 
 ---
-
-## 🎯 For Interviewers
-
-This project demonstrates:
-- ✅ End-to-end ML system design (data → model → API → deployment)
-- ✅ Probabilistic modeling and uncertainty quantification
-- ✅ Modern deep learning (GNNs, attention mechanisms)
-- ✅ Production engineering (testing, monitoring, Docker)
-- ✅ Domain knowledge (soccer analytics, sports betting)
-- ✅ Software engineering best practices (clean code, documentation, testing)
-
-**Live Demo Available**: Contact me to schedule a walkthrough and Q&A session.
-
-**Key Discussion Points**:
-- Why Bayesian + GNN vs alternatives?
-- How would this scale to 1000+ matches/day?
-- What would change with proprietary data?
-- Trade-offs made for solo development
-- What would you do with a team and budget?
