@@ -1,40 +1,49 @@
-# Dockerfile for Player Prop GNN API
-# Location: deployment/docker/Dockerfile.api
-
-FROM python:3.9-slim
+# Use Python 3.11 to match your local development environment
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies required for building Python packages
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
     git \
-    postgresql-client \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
+# Copy requirements file
 COPY requirements.txt .
 
-# Install Python dependencies  
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# --- CRITICAL BUILD OPTIMIZATION START ---
+# 1. Install PyTorch CPU version first
+RUN pip install --no-cache-dir torch==2.1.0 --index-url https://download.pytorch.org/whl/cpu
+
+# 2. Install PyTorch Geometric extensions
+# We use the --no-deps flag to prevent dependency resolution issues
+# We point specifically to the CPU-only wheel index for Python 3.11 (cp311) on Linux aarch64
+RUN pip install --no-cache-dir --no-deps \
+    torch-scatter \
+    torch-sparse \
+    torch-cluster \
+    torch-spline-conv \
+    -f https://data.pyg.org/whl/torch-2.1.0+cpu.html
+
+# 3. Install PyTorch Geometric (Core)
+RUN pip install --no-cache-dir torch-geometric==2.4.0
+
+# 4. Install the rest of the requirements
+RUN pip install --no-cache-dir -r requirements.txt
+# --- CRITICAL BUILD OPTIMIZATION END ---
 
 # Copy application code
-COPY src/ ./src/
-COPY models/ ./models/
+COPY . .
 
-# Create directories
-RUN mkdir -p logs data/raw data/processed
-
-# Environment
+# Set environment variables
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
+# Expose the API port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD curl -f http://localhost:8000/health || exit 1
-
+# Run the API
 CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
