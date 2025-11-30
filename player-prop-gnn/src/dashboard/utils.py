@@ -125,12 +125,16 @@ def check_health(timeout: int = REQUEST_TIMEOUT) -> HealthStatus:
         response.raise_for_status()
         data = response.json()
         
+        # FIX: Handle key name change from 'model_loaded' to 'ensemble_ready'
+        # This ensures backward compatibility with older API versions too
+        is_loaded = data.get('ensemble_ready', data.get('model_loaded', False))
+
         return HealthStatus(
             status=data['status'],
-            model_loaded=data['model_loaded'],
-            redis_connected=data['redis_connected'],
-            version=data['version'],
-            timestamp=data['timestamp'],
+            model_loaded=is_loaded,
+            redis_connected=data.get('redis_connected', False),
+            version=data.get('version', 'unknown'),
+            timestamp=data.get('timestamp', ''),
             warnings=data.get('warnings'),
             errors=data.get('errors')
         )
@@ -297,11 +301,6 @@ def parse_metric(metrics_text: str, metric_name: str) -> Optional[float]:
     
     Returns:
         Metric value or None if not found
-    
-    Example:
-        >>> metrics = "prop_api_cache_hit_rate 0.667\\n"
-        >>> parse_metric(metrics, "prop_api_cache_hit_rate")
-        0.667
     """
     for line in metrics_text.split('\n'):
         # Skip comments and empty lines
@@ -321,42 +320,17 @@ def parse_metric(metrics_text: str, metric_name: str) -> Optional[float]:
 
 
 def format_probability(prob: float) -> str:
-    """
-    Format probability as percentage.
-    
-    Args:
-        prob: Probability between 0 and 1
-    
-    Returns:
-        Formatted string (e.g., "67.5%")
-    """
+    """Format probability as percentage."""
     return f"{prob * 100:.1f}%"
 
 
 def format_confidence_interval(ci_low: float, ci_high: float) -> str:
-    """
-    Format confidence interval.
-    
-    Args:
-        ci_low: Lower bound
-        ci_high: Upper bound
-    
-    Returns:
-        Formatted string (e.g., "[0.0, 1.2]")
-    """
+    """Format confidence interval."""
     return f"[{ci_low:.1f}, {ci_high:.1f}]"
 
 
 def get_position_emoji(position: str) -> str:
-    """
-    Get emoji for player position.
-    
-    Args:
-        position: Player position
-    
-    Returns:
-        Emoji string
-    """
+    """Get emoji for player position."""
     emojis = {
         'Forward': '⚽',
         'Midfielder': '🎯',
@@ -367,15 +341,7 @@ def get_position_emoji(position: str) -> str:
 
 
 def get_status_color(status: str) -> str:
-    """
-    Get color for health status.
-    
-    Args:
-        status: Health status string
-    
-    Returns:
-        CSS color name
-    """
+    """Get color for health status."""
     if status == 'healthy':
         return 'green'
     elif status == 'unhealthy':

@@ -115,11 +115,11 @@ async def startup_event():
         # Tier 2: GNN
         # Construct DB config from settings for GNN graph building
         db_config = {
-            'host': settings.DB_HOST,
-            'port': settings.DB_PORT,
-            'database': settings.DB_NAME,
-            'user': settings.DB_USER,
-            'password': settings.DB_PASSWORD
+            'host': settings.DATABASE_HOST,
+            'port': settings.DATABASE_PORT,
+            'database': settings.DATABASE_NAME,
+            'user': settings.DATABASE_USER,
+            'password': settings.DATABASE_PASSWORD
         }
         
         logger.info(f"Loading Tier 2 (GNN) from {t2_model_path}...")
